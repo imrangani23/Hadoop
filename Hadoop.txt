@@ -1,0 +1,1557 @@
+
+`HDFS`
+
+'-getmerge' command in Hadoop is for merging files existing in the HDFS file system into a single file in the local file system.
+	hdfs dfs –getmerge [-nl] <src> <localdest>
+
+'-stat' command will return filenames only 
+	hdfs dfs -stat "%n" my/path/a*		<-- without "%n" shows only the date and time of the file creation 
+'list the namenode and datanodes of a cluster from any node'
+	>hdfs dfsadmin -report
+	>hdfs getconf -confKey fs.defaultFS
+	 --> hdfs://hdd2cluster
+	>hdfs getconf -namenodes
+	-->hpchdd2.hpc.ford.com hpchdd2x.hpc.ford.com
+	> hdfs getconf -secondaryNamenodes
+	-->Incorrect configuration: secondary namenode address dfs.namenode.secondary.http-address is not configured.
+
+
+'to list the total size of the hdfs cluster'
+	> hadoop fs -df hdfs:/
+		Picked up JAVA_TOOL_OPTIONS: -Xmx1024m
+		Filesystem                      Size              Used        Available  Use%
+		hdfs://hdd2cluster  2231764506501120  1876979249534162  343133050934542   84%
+
+	>  hadoop fs -df -h
+		Picked up JAVA_TOOL_OPTIONS: -Xmx1024m
+		Filesystem           Size   Used  Available  Use%
+		hdfs://hdd2cluster  2.0 P  1.8 P    182.8 T   91%
+
+	> hdfs dfsadmin -report
+		Picked up JAVA_TOOL_OPTIONS: -Xmx1024m
+		Configured Capacity: 2231764506501120 (1.98 PB)
+		Present Capacity: 2229593096735457 (1.98 PB)
+		DFS Remaining: 201308280757920 (183.09 TB)
+		DFS Used: 2028284815977537 (1.80 PB)
+		DFS Used%: 90.97%
+		Replicated Blocks:
+		        Under replicated blocks: 0
+		        Blocks with corrupt replicas: 0
+		        Missing blocks: 0
+		        Missing blocks (with replication factor 1): 0
+		        Low redundancy blocks with highest priority to recover: 0
+		        Pending deletion blocks: 138
+		Erasure Coded Block Groups:
+		        Low redundancy block groups: 0
+		        Block groups with corrupt internal blocks: 0
+		        Missing block groups: 0
+		        Low redundancy blocks with highest priority to recover: 0
+		        Pending deletion blocks: 0
+
+'Changing the replication factor of a file:'
+	hadoop fs -setrep -w 2 <filename>
+
+'Check whether namenode in safemode and leave safe mode:'
+	hdfs dfsadmin -safemode get
+	hdfs dfsadmin -safemode leave
+
+'Fix corrupt HDFS Files:'
+		hdfs fsck /  (or "hdfs fsck / | egrep -v '^\.+$' | grep -v eplica")
+	This will list the corrupt HDFS blocks:
+		hdfs fsck -list-corruptfileblocks
+	Once you find a file that is corrupt
+		hdfs fsck /path/to/corrupt/file -locations -blocks -files
+		hdfs fs -rm /path/to/file/with/permanently/missing/blocks
+	(or)
+		bin/hadoop fsck / -delete
+
+'To list the property/parameter value set on hdfs:'
+	hdfs getconf -confKey fs.defaultFS
+
+'To Investigate on particular application run on yarn providing jobhistory server started:'
+	Open the YARN UI, and inspect the dashboard of recent jobs for that ID 
+	(OR)
+  	yarn application -status <application_1496499143480_0003>
+ 	yarn logs -applicationId <application_1496499143480_0003> | more
+
+'to get the quota of a directory for HDFS'
+	> hdfs dfs -count -q -h -v  /user/cvdpdevp
+	
+	       QUOTA       REM_QUOTA     SPACE_QUOTA REM_SPACE_QUOTA    DIR_COUNT   FILE_COUNT       CONTENT_SIZE PATHNAME
+	        none             inf           750 G         749.0 G          272          614            350.8 M /user/cvdpdevp
+
+'Below is the query to get the path and file_count for each path. Query has to be update with respect to the source.'
+
+	INSERT OVERWRITE DIRECTORY 'hdfs://hdp2cluster/tmp/spedipin/CitySolutions/'
+	ROW FORMAT DELIMITED
+	FIELDS TERMINATED BY '\t'
+	STORED AS TEXTFILE
+	SELECT reverse(substr(reverse(path),instr(reverse(path),'/'),length(path))) as files_path,count(1) as number_of_files 
+	FROM fsimage_txt_delimited_partitioned  
+	WHERE date_partition='20200327' and path like '%CitySolutions%' and fsize < 31457280 group by reverse(substr(reverse(path),instr(reverse(path),'/'),length(path)));
+
+`AWK`
+'Find how many columns/fields using IFS - available in a CSV file'
+	
+	awk -F ',' '{print NR,NF,$0}' file_test.txt <-- prints line number, count of columns, entire line ‘print $0’ means print the current line) 
+	awk -F ',' 'NF != 31' file_test.txt <-- prints entire column matching the condition (in place od NF we can also specify $1 or $7 etc)
+	
+	hdfs dfs -ls /project/CVDP/CVDPDEV/Archive/*/Completed | awk -F " " '{print $8}' | awk -F "/" '{print $6}' | uniq | awk NF
+	
+	Reference for basi awk <--- https://www.gnu.org/software/gawk/manual/html_node/Very-Simple.html
+
+'list all the file names match with a word'
+	hdfs dfs -ls /testing/project/CVDP/CVDPDEV/Workflow/properties/java/vendor* | awk '{print $8}' | while read f; do hdfs dfs -cat $f | grep SFTP && echo $f; done
+		--> connectType=SFTP
+		--> /testing/project/CVDP/CVDPDEV/Workflow/properties/java/vendorEMSimBlngData.properties
+		--> Picked up JAVA_TOOL_OPTIONS: -Xmx1024m
+		--> connectType=SFTP
+		--> /testing/project/CVDP/CVDPDEV/Workflow/properties/java/vendorFordTrialReports.properties
+		--> Picked up JAVA_TOOL_OPTIONS: -Xmx1024m
+		--> Picked up JAVA_TOOL_OPTIONS: -Xmx1024m
+		--> connectType=SFTP
+		--> /testing/project/CVDP/CVDPDEV/Workflow/properties/java/vendorIntrepidWivi.properties
+		--> Picked up JAVA_TOOL_OPTIONS: -Xmx1024m
+		--> connectType=SFTP
+
+'HDFS MOVE COMMAND FOR FILES MORE THAN X DAYS'
+
+	hdfs dfs -ls /project/CVDP/CVDPDEV/Archive/Completed/  | awk '{ if ((($6 < "'"2020-05-05"'" ))) system("hdfs dfs -mv " $8 " " "/project/CVDP/CVDPDEV/Staging/Project/Input")}'
+
+	where /project/CVDP/CVDPDEV/Archive/Completed/  is Source folder & /project/CVDP/CVDPDEV/Staging/Project/Input is Destination folder
+	And the highlighted date is the condition which results in moving only the files which are older than 05th May.
+
+	Execute commands with awk system function - here we are moving the files from /path to /path2 by altering the file name with substr fn
+	> hdfs dfs -stat "%n" /path/ | awk '{ system("hdfs dfs -mv /path/" $1 " " "/path2/" substr($1,6) ) }'
+
+	Move 10 files from hdfs path 1 to path 2
+	> hdfs dfs -stat "%n" /path/\* | head -10 | xargs -i  hdfs dfs -mv /path/{} /path2/ 
+
+
+'HDFS Total file size based on a particular date'
+	hdfs dfs -ls -R /project/CVDP/CVDPDEV/Warehouse/Secure/TCU2G/ | grep -E '^-.*2020-07-05' | awk '{
+	nkey = $6
+	if(key != nkey && key != "") {
+	printf("%s\t%d\t%d\n", key, freq, size)
+	freq = 1;
+	size = $5
+	} else {freq++
+	size += $5
+	}
+	key = nkey
+	}
+	END {printf("%s\t%d\t%f%s\n", key, freq, size/(1024*1024*1024) ," GB")
+	}'
+	>>Picked up JAVA_TOOL_OPTIONS: -Xmx1024m 
+	>>2020-07-05      182     0.557883 GB
+
+'Find list of empty files in a directory'
+	hdfs dfs -ls -R /project/CVDP/CVDPDEV/Archive/VHA/Completed/ | awk '$1 !~ /^d/ && $5 == "0" { print $8 }' <-- !~  means not equal to ( equals to ^d condition gives empty folders list)
+
+'Find total number of empty folders present in the directorty'
+	hdfs dfs -du -s -h /project/CVDP/CVDPDEV/Archive/VHA/Completed/\* | awk '$1 =="0" && $2 == "0" { print $3 }' | wc -l
+
+'To list the zero sized files and directories:'
+
+	hdfs dfs -ls -R /project/CVDP/CVDPDEV/Archive/VHA/Completed/ | awk -F " "  '{print $8}' | head -20 | xargs -i  hdfs dfs -du -s -h {} | awk '$1 =="0" && $2 == "0" { print $3 }' 
+
+'To directly delete the zero sized files and directories:'
+
+	hdfs dfs -ls -R /project/CVDP/CVDPDEV/Archive/VHA/Completed/ | awk -F " "  '{print $8}' | head -20 | xargs -i  hdfs dfs -du -s -h {} | awk '{ if ((($1 == "'"0"'"))) system("hdfs dfs -rm -r " $3)}'
+
+
+oozie jobs -jobtype wf -len 100000 -filter "status=KILLED;startcreatedtime=-1d" | grep -i CvdpFordPassAppreciation_
+
+'Operations on Variable:'  --> https://www.tldp.org/LDP/Bash-Beginners-Guide/html/sect_10_03.html
+
+
+================================================================
+`MapReduce`
+
+The maximum number of attempts to run a task is controlled by the mapreduce.map.maxattempts property for map tasks and mapreduce.reduce.maxattempts for reduce tasks
+
+================================================================
+`SQOOP`
+
+sqoop list-databases --connect jdbc:db2://base:50000/SAMPLE --username mling --password ppp@1
+sqoop list-tables --connect jdbc:db2://base:50000/SAMPLE --username mling -P
+
+sqoop import --connect jdbc:db2://base:50000/SAMPLE --username MLING -P -table EMPLOYEE -m 1 --delete-target-dir;
+
+sqoop export --connect jdbc:db2://base:50000/SAMPLE --username MLING -P -table EMP_SQ --export-dir /user/hduser/EMPLOYEE/part-m-00000  --fields-terminated-by ',' --lines-terminated-by '\n';
+
+sqoop import --connect jdbc:db2://base:50000/SAMPLE --username MLING -P -table EMPLOYEE -m 3 --split-by empno --target-dir EMP_m3 --delete-target-dir;
+
+sqoop import --connect jdbc:db2://base:50000/SAMPLE --username MLING -P -table EMPLOYEE -m 1 --where "job != 'MANAGER'" --append --target-dir EMP_m3 ;
+
+sqoop import  --connect jdbc:db2://192.168.1.6:50000/SAMPLE --username MLING --password ppp@1 -table EMP_PHOTO -m 1 --target-dir EMP_PHOTO --delete-target-dir --as-avrodatafile;
+
+sqoop export --connect jdbc:db2://192.168.1.6:50000/SAMPLE --username MLING --password ppp@1 -table EMP_PHOTO_HDFS -m 1 --export-dir /user/hduser/EMP_PHOTO/ --map-column-java "PICTURE=String" --fields-terminated-by ',' --lines-terminated-by '\n';
+
+sqoop export --connect jdbc:db2://192.168.1.6:50000/SAMPLE --username MLING --password ppp@1 -table EMP_PHOTO_HDFS -m 1 --export-dir /user/hduser/EMP_PHOTO/ ;
+
+https://docs.hortonworks.com/HDPDocuments/HDP2/HDP-2.3.0/bk_dataintegration/content/ch_using-sqoop.html
+
+sqoop import-all-tables --connect jdbc:db2://base:50000/SAMPLE --username mling --password ppp@1 --warehouse-dir '/user/hduser/alltables' -m 1
+
+sqoop eval --connect jdbc:db2://base:50000/SAMPLE --username mling --password ppp@1 --query "select * from emp_sq where sex='M'" 
+
+--delete-dir and --apend are mutually exclusive
+
+--split-by need to be used when there is --num-mappers (by def 4) is more than 1 and  no primary key is available on the target table 
+the column used in splitby should be numeric(varchar also possible but with enabling special flag -Dorg.apache.sqoop.splitter.allow_text_filter=true), or sequence or incremented values. (high no of diff values)
+or enable --autoreset-to-one-mapper -- this helps when there is no primary key on the target table it resets the num mappers to one. 
+
+
+
+sqoop export \
+--connect jdbc:mysql://base:3306/empoffice?zeroDateTimeBehavior=CONVERT_TO_NULL \
+--username hive \
+--password hive \
+--export-dir /user/hduser/external/book_m/yr=1996/000000_0 \
+--table books \
+--lines-terminated-by '\n' \
+--fields-terminated-by '~';
+
+
+sqoop import \
+--connect jdbc:mysql://base:3306/empoffice?zeroDateTimeBehavior=CONVERT_TO_NULL \
+--username hive \
+--password hive \
+--target-dir /user/hduser/external/books_q \
+--table books \
+--lines-terminated-by '\n' \
+--fields-terminated-by '~' \
+--as-avrodatafile \
+--num-mappers 1 ;
+
+
+************Errors and Solution*****************
+Command used: sqoop import --connect jdbc:mysql://base:3306/custdb?zeroDateTimeBehavior=CONVERT_TO_NULL --username hive --password hive --table credits_cst --delete-target-dir --target-dir /user/hduser/credits_cst/ -m 1
+
+ERROR sqoop.Sqoop: Got exception running Sqoop: java.lang.R    untimeException: java.lang.RuntimeException: java.sql.SQLException: The conne    ction property 'zeroDateTimeBehavior' acceptable values are: 'CONVERT_TO_NULL    ', 'EXCEPTION' or 'ROUND'. The value 'convertToNull' is not acceptable.
+java.lang.RuntimeException: java.lang.RuntimeException: java.sql.SQLException    : The connection property 'zeroDateTimeBehavior' acceptable values are: 'CONV    ERT_TO_NULL', 'EXCEPTION' or 'ROUND'. The value 'convertToNull' is not accept    able.
+
+Work Around: (https://stackoverflow.com/questions/48436347/sqoop-import-error)
+			sqoop import --connect jdbc:mysql://base:3306/custdb?zeroDateTimeBehavior=CONVERT_TO_NULL --username hive --password hive --table credits_cst --delete-target-dir --target-dir /user/hduser/credits_cst/ -m 1
+
+===========================================================================================
+`Hive:`
+------
+
+hive -hiveconf hive.root.logger=DEBUG,console
+
+set hive.cli.print.header=true; 
+
+`HIVE DDL:`
+----------
+'Creat database'
+	CREATE DATABASE BOOKSDB;
+	USE BOOKSDB;
+
+"Sample file"
+Header Info:  "ISBN";"BookTitle";"BookAuthor";"Year";"Publisher";"ImageURLS";"ImageURLM";"ImageURLL"
+Value : 	  "0195153448";"Classical Mythology";"Mark P. O. Morford";"2002";"Oxford University Press";"http://images.amazon.com/images/P/0195153448.01.THUMBZZZ.jpg";"http://images.amazon.com/images/P/0195153448.01.MZZZZZZZ.jpg";"http://images.amazon.com/images/P/0195153448.01.LZZZZZZZ.jpg"
+
+Default Delimiters:
+ Each fields are delimited by CTRL-A (ie Octal \001).
+ If a field is a complex type(such as ARRAY, STRUCT or MAP) containing Primitive Type(like INT, STRING), then each value inside the complex type is delimited by CTRL-B (\002)
+ In a map, Key & Value is always delimited by ^C)
+
+'Create normal table'
+	CREATE TABLE BOOKS(ISBN INT,BOOKTITLE STRING,BOOKAUTHOR STRING,YEAR INT,PUBLISHER STRING,IMAGEURLS STRING,IMAGEURLM STRING,IMAGEURLL STRING) 
+	ROW FORMAT DELIMITED 
+	FIELDS TERMINATED BY ','
+	STORED AS TEXTFILE;
+
+	LOAD DATA LOCAL INPATH "/home/hduser/BX/BX-BooksCorrected.txt" OVERWRITE INTO TABLE BOOKS;
+
+'Rename' the table itself
+	ALTER TABLE BOOKS RENAME TO BOOKLIST;
+
+'Change datatype' of column isbn from INT to STRING: (we can even change the column name too)
+	ALTER TABLE BOOKS CHANGE ISBN ISBN_ STRING; 
+
+'Change delimiter'
+	ALTER TABLE BOOKS SET SERDE 'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe' WITH SERDEPROPERTIES ('field.delim' = '\;');
+
+'Drop Columns':  (we can also change the order of columns)
+	ALTER TABLE BOOKS REPLACE COLUMNS (ISBN STRING, BOOKTITLE STRING, BOOKAUTHOR STRING, YEAR INT, PUBLISHER STRING); 
+
+'NO_DROP' - Alter the table enable/disable protection to NO_DROP, which prevents a table from being dropped, or OFFLINE, which prevents data (not metadata) in a table from being queried:
+		ALTER TABLE c_employee ENABLE NO_DROP;
+		ALTER TABLE c_employee DISABLE NO_DROP;
+
+	We can stop a partition form being queried by using the ENABLE OFFLINE clause with ALTER TABLE statement.
+		ALTER TABLE c_employee ENABLE OFFLINE;
+		ALTER TABLE c_employee DISABLE OFFLINE;
+
+'DROPing Tables'
+	1. Drop external table (drops data & schema) 
+		ALTER TABLE table_name SET TBLPROPERTIES ('EXTERNAL'='FALSE');
+		DROP TABLE table_name;
+
+	2. Drop external table (keep data & remove only the structure frm hive)
+		DROP TABLE external_hive_table;
+
+	3. Drop an external table along with data (Hive 3)
+		TBLPROPERTIES ('external.table.purge'='true'); <<- When this property set for an external table,The table is removed from Hive Metastore and the data stored externally.
+
+'Indexing in Hive'
+	Whenever we perform a query on a table that has an index, there is no need for the query to scan all the rows in the table. Further, it checks the index first and then goes to the particular column and performs the operation.
+	An Index acts as a reference to the records
+
+Types - 'COMPACT Index'- stores the pair of indexed column’s value and its blockid. 
+	  - 'BITMAP Index' - stores the combination of indexed column value and list of rows as a bitmap
+
+	'Creating Index'
+		CREATE INDEX index_name
+		ON TABLE table_name (columns,....)
+		AS 'org.apache.hadoop.hive.ql.index.compact.CompactIndexHandler'  |  'BITMAP'  <-- refers the type of idex to be created
+		WITH DEFERRED REBUILD;
+
+		ALTER INDEX index_nam on table_name REBUILD;
+
+	We can have any number of indexes for a particular table and any type of indexes as well.
+	On the same column we can create both type of indexes on same column.
+
+	"SHOW FORMATTED INDEX ON MOVIES;"  <-- list the no of indexes on the tables if exists
+	--result
+	idx_name                tab_name                col_names               idx_tab_name            idx_type                comment
+	
+	mid_index               movies                  mid                     movies__movies_mid_index__      compact
+	bit_indx                movies                  mid                     movies__movies_bit_indx__       bitmap
+	--
+	'Drop Index'
+		DROP INDEX IF EXISTS BIT_INDX ON MOVIES;
+	
+	'When not to use index in hive:'
+		Indexes are advised to build on the columns on which you frequently perform operations.
+		Building more number of indexes also degrade the performance of your query.
+		Type of index to be created should be identified prior to its creation (if your data requires bitmap you should not create compact).This leads to increase in time for executing your query.
+
+'Statistics'
+	
+	Issue the command "describe formatted table_name;"
+	Table Parameters: <-- look for parameters and the below variable shoul set to true if atas are available for this table
+	    COLUMN_STATS_ACCURATE   true <-- shows the table stats are collected
+	To update the column statistics:
+		"ANALYZE TABLE MOVIES COMPUTE STATISTICS FOR COLUMNS MID,MNAME;"
+
+	DESC FORMATTED MOVIES MID; <-- to fetch column stats info
+	# col_name              data_type               min                     max                     num_nulls               distinct_count          avg_col_len                max_col_len             num_trues               num_falses              comment
+	mid                     int                     1                       193886 	                 0                       96484                                                                                                                      from deserializer
+
+# https://cwiki.apache.org/confluence/display/Hive/StatsDev
+
+
+==============
+`FILE FORMATS`
+
+'AVRO file format' 
+"LOAD to HIVE EXTERNAL TABLE FROM ARVO FILE"
+	CREATE EXTERNAL TABLE BOOKS_AV(ISBN INT,BOOKTITLE STRING,BOOKAUTHOR STRING,YEAR INT,PUBLISHER STRING)
+	ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.avro.AvroSerDe'
+	STORED AS INPUTFORMAT 'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat'
+	OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat'
+	LOCATION '/user/hduser/external/books_av';
+
+ If we extracted avro schema then no need to specify column structure. Command to extract avro schema from .avro format file is below
+		java -jar $SCOOP_HOME/lib/avro-tools-1.8.1.jar getschema hdfs:///user/hduser/external/books_q/part-m-00000.avro > /tmp/books_av.avsc
+	
+	CREATE EXTERNAL TABLE books_avs
+	STORED AS AVRO
+	LOCATION '/user/hduser/external/books_av/'
+	TBLPROPERTIES ('avro.schema.url'='/tmp/books_av.avsc');	<-- schema /path/file 
+
+'PARQUET file format'
+	Parquet stores binary data in a column-oriented way, where the values of each column are organized so that they are all adjacent, enabling better compression
+
+	CREATE EXTERNAL TABLE BOOKS_PQ(ISBN STRING,BOOKTITLE STRING,BOOKAUTHOR STRING,YEAR INT,PUBLISHER STRING)
+	STORED AS PARQUET 
+	LOCATION '/user/hduser/external/books_pq';
+	
+	We cannot load text file directly into parquet table,
+	we should first create an staging table to store the text file and use insert overwrite command to write the data in parquet format.
+
+'ORC file format'
+	Supports ACID Transactions & Cost-based Optimizer (CBO). Stores column-level metadata.
+
+
+===============
+`Partitioning`
+
+'Static Partitioning'
+	set hive.exec.dynamic.partition=true
+	set hive.exec.dynamic.partition.mode=strict
+	set hive.mapred.mode=strict; <--the strict mode ensures that the queries on partitioned tables cannot execute without defining a WHERE clause.
+
+	CREATE TABLE BOOKS_PART(ISBN STRING,BOOKTITLE STRING,BOOKAUTHOR STRING,YEAR INT,PUBLISHER STRING)
+	PARTITIONED BY (YR INT) 
+	ROW FORMAT DELIMITED
+	FIELDS TERMINATED BY '~'
+	STORED AS TEXTFILE;
+	
+	INSERT INTO TABLE BOOKS_PART PARTITION (YR=1997) SELECT * FROM BOOKS WHERE YEAR=1997;
+	
+	SHOW PARTITIONS BOOKS_PART; <-- this will show the no of partitions available on the table
+
+	'Export hive data into file' -> Manually create a part of data from hive to hdfs as below.
+		INSERT OVERWRITE DIRECTORY '/user/hduser/external/books_part/yr=2004' 
+		ROW FORMAT DELIMITED 
+		FIELDS TERMINATED BY '~' 
+		SELECT * FROM BOOKS WHERE YEAR=2004;
+
+	move the o/p of above path to the location of the partitioned table & do an MSCK to automatically invoke the new partitions.
+
+	'MSCK REPAIR' doesnt remove partitions if the corresponding folder on HDFS was manually deleted,  it will add any partitions that exist on HDFS but not in metastore to the metastore.
+
+		MSCK REPAIR TABLE BOOKS_PART;
+		OR 
+		ALTER TABLE BOOKS_PART ADD PARTITION (YR=2004) LOCATION '/user/hduser/external/books_part/yr=2004';
+
+	'Error statement' in MSCK execution:
+
+	    0: jdbc:hive2:> msck repair table NCVDCH4_CVDP_INVALID_DATA_SEC_HTE;
+		Error: Error while processing statement: FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.DDLTask (state=08S01,code=1)
+
+		0: jdbc:hive2:> set hive.msck.path.validation;
+		+----------------------------------+--+
+		|               set                |
+		+----------------------------------+--+
+		| hive.msck.path.validation=throw  |
+		+----------------------------------+--+
+		
+		To resolve the above issue follow the below:
+		> set hive.msck.path.validation=ignore;
+		
+		> msck repair table cvdp_dev.NCVDCH4_CVDP_INVALID_DATA_SEC_HTE;
+		No rows affected (0.609 seconds)
+
+	'Adding multiple partitions in single query'
+		ALTER TABLE EMPLOYEE ADD PARTITION (year=2005) PARTITION (year=2006) PARTITION (year=2008) PARTITION (year=2009) PARTITION (year=2010);
+		ALTER TABLE db_bdpbase.Employee DROP IF EXISTS PARTITION (year=2008), PARTITION(year=2009), PARTITION(year=2010);
+		ALTER TABLE db_bdpbase.Employee DROP IF EXISTS PARTITION(year>2010);
+
+/*
+if the underlying hdfs f/s was deleted without droping the table partition, we can refresh the metadata to reflect the current state by doing -- Drop the table (only in case of external table) - Recreate the table - Repair it (MSCK REPAIR TABLE table_name)
+We can “statically” add a partition in the table and move the file into the partition of the table.
+We can alter the partition in the static partition
+*/
+
+'Dynamic Partitioning'
+	set hive.exec.dynamic.partition=true;
+	set hive.exec.dynamic.partition.mode=nonstrict;
+	set hive.exec.max.dynamic.partitions=1000
+	set hive.exec.max.dynamic.partitions.pernode=100
+
+ We can’t perform alter on the Dynamic partition.
+
+	CREATE TABLE BOOK_EX(ISBN STRING, BOOKTITLE STRING, BOOKAUTHOR STRING, PUBLISHER STRING) --year column is not mentioned as a part of table column here
+	PARTITIONED BY (YEAR INT)
+	ROW FORMAT DELIMITED
+	FIELDS TERMINATED BY '~'
+	STORED AS TEXTFILE
+	LOCATION '/user/hduser/external/book_xx'; 
+
+	INSERT OVERWRITE TABLE BOOK_EX PARTITION(YEAR) SELECT * FROM BOOKS;
+	/*
+	To insert the data, the dynamic partition columns must be specified in last among the columns in the SELECT statement and in the same order in which they appear in the PARTITION() clause.
+	*/
+	'__hive_default_partition__' - This gets create when we load data into partitioned table dynamically and partition column has a NULL value. To check we can issue the query like below in where clause
+		
+		SELECT * FROM BOOK_EX WHERE YEAR="__HIVE_DEFAULT_PARTITION__";
+
+====================
+`Bucketing`
+	set hive.enforce.bucketing = true ;
+
+	We cannot load the data into a bucketed table using LOAD DATA INPATH command as Hive does not support it. 
+	The no of reducers created at compile time and that will be equal to no.of buckets to gain equal distribution qualify the integer column which has high cardinal values example:empid
+
+	--Create table movies
+	CREATE TABLE MOVIES(MID INT,  MNAME STRING, GENRE array<STRING>)
+	ROW FORMAT DELIMITED
+	FIELDS TERMINATED BY ',' 
+	COLLECTION ITEMS TERMINATED BY '|' 
+	STORED AS TEXTFILE;
+
+	--load from file /user/hduser/movies/movies.csv
+	LOAD DATA LOCAL INPATH '/home/hduser/MV/movies.csv' INTO TABLE MOVIES;
+	#above csv file has the header in the file -  alter the table to set new table property
+	ALTER TABLE MOVIES SET TBLPROPERTIES ("skip.header.line.count"="1");
+	-- to list the properties set fot the table.
+	SHOW TBLPROPERTIES MOVIES;
+	#to unset the tblproperties 
+	ALTER TABLE MOVIES UNSET TBLPROPERTIES ('c', 'x', 'y', 'z'); --> c,x,y,z are all property names
+
+	--after the alters performed again load the input .csv data 
+	LOAD DATA INPATH '/user/hduser/movies/movies.csv' OVERWRITE INTO TABLE MOVIES;
+	--create another table which is clustered and store in ORC format
+	CREATE TABLE movies_orc_buc (MID INT,  MNAME STRING, GENRE ARRAY<STRING>)
+	CLUSTERED BY (MID) 
+	SORTED BY (MID) INTO 5 BUCKETS
+	STORED AS ORC;
+	--insert data to new table from the old table moveis
+	INSERT INTO TABLE MOVIES_ORC SELECT * FROM MOVIES;
+	--alter the buckets to 10 from 5
+	ALTER TABLE MOVIE_ORC CLUSTERED BY (MID) INTO 5 BUCKETS;
+	--again overwrite the insert from old table movies, Now we can see 10 buckets created in hdfs f/s
+
+	'We can not set the table property 'transactional'='true' in an external table': --> below error will come
+	/*
+	Error: Error while processing statement: FAILED: Execution Error, return code 1 
+	from org.apache.hadoop.hive.ql.exec.DDLTask. MetaException(message:cvdp.NCVDCDR_FORDPASS_APPR_LOC_SEC_HTE cannot be declared transactional because
+	 its an external table) (state=08S01,code=1)
+	*/
+
+
+====================
+`JOINS in hive`
+
+'NORMAL JOIN':
+	SELECT c.ID, c.NAME, o.AMOUNT, o.DATE FROM CUSTOMERS c LEFT|RIGHT|FULL OUTER JOIN ORDERS o ON (c.ID = o.CUSTOMER_ID);
+
+	Normal join works - each table goes into separate mappers and then to shuffle phase - then to reducer where as one mapper output is copied 
+	in to memory and another mapper out is streamed to the reducer to perform join. So it is better to load the bigger table to stream and small 
+	table to copied to memory. 
+
+'STREAMTABLE HINT':
+	Select /*+ STREAMTABLE(a) */ a.key, a.value from a join b on a.key = b.key;
+	
+	if table a is bigger we are telling hive to stram the table a whereas b copied to memory. Thus enabling optimization. Still stramtable hint uses reducer to perform joins.
+	By default the tables in the left is copied to memory and right side table goes to stream.
+
+'MAP JOIN':
+
+	Map Side Join since one of the tables in the join is a small table and can be loaded into memory, so that a join could be performed within A MAPPER without using a Map/Reduce step.
+	Rightouter join and full outer join are not possible in MAPSIDE join.
+
+'MAPJOIN HINT':
+	Select /*+ MAPJOIN(b) */ a.key, a.value from a join b on a.key = b.key <-- MAPJOIN(b) tells the hive to choose b to load in to memory.
+	make sure the parameter set hive.ignore.mapjoin.hint=true is set to true. 
+
+	MAPJOIN creates a MAPRED LOCAL TASK is launched before the original join task and serializes the table in hint into an hashtable, 
+	the hash table is then uploaded to HADOOPs DISTRIBUTED CACHE - hadoop will copy the hashtable to the local f/s to all the nodes executing the actual task before anytask 
+	for the job are executed on the node. HASHTABLE will be available locally to each mappers. Then the actual join performed on the mapper.
+
+'AUTO JOIN:'
+	Auto Join creates a conditional task to check which table in the join has largedataset based on it, Hive chooses table to placed in DC.
+
+	Parameters: 
+	hive.auto.convert.join=true <-- def is true, if set automatically process all joins as mapside join if a table size is less than 25 MB.
+	hive.mapjoin.smalltable.filesize=25000000 <-- def is 25MB this size limits the auto join, if we want to enable mapjoin automatically for tables are of size more than 25MB we can tune this paramater.
+	hive.auto.convert.join.noconditionaltask=true <-- we can combine three or more map-side joins into a single map-side join if the size of the n-1 table is less than 10 MB.
+	hive.auto.convert.join.noconditionaltask.size=10000000; <-- by def 10MBthis size limits the noconditionaltask parameter to work
+
+'SMB (Sort-Merge-Bucketed) JOIN':
+   To perform SMB join all the following criteria must be true
+	1. All join tables must be bucketized.
+	2. Number of buckets of the big table must be divisible by the number of buckets of each of the small table in your query.
+	3. Bucket columns from the table and the join columns in your query must be the one and the same.
+	4. Following properties must be setup 
+
+	set hive.auto.convert.sortmerge.join=true;
+	set hive.optimize.bucketmapjoin = true;
+	set hive.optimize.bucketmapjoin.sortedmerge = true;
+	set hive.auto.convert.sortmerge.join.noconditionaltask=true;
+
+	Big table will result in 10 mappers if the no of bucket is 10. 
+	only matching bucket of all small tables are replicated on to each mapper and then the join will takes place on each mapper. 
+	Since the records are already sorted, only matching buckets are joined - this task requires no reducers and completes faster.
+
+'For Historical LOAD': If any historical load occurs (Join single or multiple tables or one hive table to another table load) in your feature through one time Hive script, 
+	please include the below hive settings to avoid the memory issue/script interruption in middle.
+
+	set tez.am.resource.memory.mb=8192;
+	set hive.exec.orc.split.strategy=BI;
+	set hive.orc.cache.use.soft.references=true;
+
+	set hive.exec.orc.split.strategy=BI;
+
+	if your source table is orc and splits calculation takes too long time need to add above settings
+
+	set hive.orc.cache.use.soft.references=true;
+
+	Setting this to true can help avoid out-of-memory issues under memory pressure (in some cases) at the cost of slight unpredictability in overall query performance.
+
+====================
+`Built-in Table-Generating Functions (UDTF)`
+	Normal user-defined functions, such as concat(), len() take in a single input row and output a single output row. In contrast, table-generating functions transform a single input row to multiple output rows.
+
+'EXPLODE' -> (array and map)
+	Lateral view explode, explodes the array data into multiple rows. Like a cross join in the example below:
+
+	CREATE TABLE test_l7 (person string, phones array<int> ) row format delimited fields terminated by ',' STORED AS TEXTfile LOCATION '/hdfs/path/testing_l7';
+	 
+	insert into test_l7 select  'lingesh' , ARRAY( 96771 , 96771090 , 3 );
+	insert into test_l7 select  'prashanth' , ARRAY( 86771 , 971090 , 2 );
+	insert into test_l7 select  'sudharsan' , ARRAY( 76771 , 96770 , 1 );
+	insert into test_l7 select  'ramesh' , ARRAY( 66771 , 960 , 8783 );
+	insert into test_l7 select  'subash' , ARRAY( 56771 , 96 , 83783 );
+	insert into test_l7 select  'mani' , ARRAY( 46771 , 90 , 783 );
+
+	select * from test_l7;
+	+------------+---------------------------+
+	|   person   |          phones           |
+	+------------+---------------------------+
+	| prashanth  | [86771,971090,989838783]  |
+	| sudharsan  | [76771,96770,989837883]   |
+	| ramesh     | [66771,960,8783]          |
+	| subash     | [56771,96,83783]          |
+	| mani       | [46771,90,783]            |
+	| lingesh    | [96771,96771090,3]        |
+	| prashanth  | [86771,971090,2]          |
+	| sudharsan  | [76771,96770,1]           |
+	+------------+---------------------------+
+
+Applying a lateral view explode on the above table will expand the both person and phones & do a cross join, your final table will look like this:
+	
+	select person, Phone 
+	from test_l7 
+	lateral view explode(phones) pn as Phone;
+
+	+------------+------------+
+	|   person   |   phone    |
+	+------------+------------+
+	| prashanth  | 86771      |
+	| prashanth  | 971090     |
+	| prashanth  | 989838783  |
+	| sudharsan  | 76771      |
+	| sudharsan  | 96770      |
+	.
+	.
+	| sudharsan  | 76771      |
+	| sudharsan  | 96770      |
+	| sudharsan  | 1          |
+	+------------+------------+
+	24 rows selected (0.365 seconds)
+
+--------------------------------------------------------------------------------------------------------------------
+'POSEXPLODE' -> (array only)
+
+	CREATE TABLE testpos( person string, phones array<int>, country array<string> ) row format delimited fields terminated by ',' STORED AS TEXTfile  LOCATION 'path/hdfs/testpos';
+	 
+	insert into testpos select  'lingesh' , ARRAY(96771, 96771090, 3), ARRAY('IND','USA','CHN');
+	insert into testpos select  'prashanth' , ARRAY(86771, 971090, 2), ARRAY('NRI','AED','RSA');
+	insert into testpos select  'sudharsan' , ARRAY(76771, 96770, 1), ARRAY('DOG','CAT','PLI');
+	insert into testpos select  'ramesh' , ARRAY(66771, 960, 8783), ARRAY('BAR','RAP','JOK');
+	insert into testpos select  'subash' , ARRAY(56771, 96, 83783), ARRAY('DHL','CHN','BOM');
+	insert into testpos select  'mani' , ARRAY(46771, 90, 783), ARRAY('ISU','BOB');
+
+	select * from testpos;
+	+------------+---------------------+----------------------+
+	|   person   |       phones        |       country        |
+	+------------+---------------------+----------------------+
+	| lingesh    | [96771,96771090,3]  | ["IND","USA","CHN"]  |
+	| prashanth  | [86771,971090,2]    | ["NRI","AED","RSA"]  |
+	| sudharsan  | [76771,96770,1]     | ["DOG","CAT","PLI"]  |
+	| ramesh     | [66771,960,8783]    | ["BAR","RAP","JOK"]  |
+	| subash     | [56771,96,83783]    | ["DHL","CHN","BOM"]  |
+	| mani       | [46771,90,783]      | ["ISU","BOB"]        |
+	+------------+---------------------+----------------------+
+
+"POSEXPLODE gives you an index along with value when you expand any column, and then you can use this indexes to map values with each other as mentioned below."
+
+	SELECT person, pos_phone, phones_, pos_country, country_ <-- selecting the positional fields for reference
+	FROM testpos 
+	lateral view posexplode(phones) pn AS pos_phone , phones_ <-- produces (0, 96771)
+	lateral view posexplode(country) cn AS pos_country , country_ <-- produces (0, IND)
+	WHERE pos_phone == pos_country;  <-- join condition on the positional index values
+
+	+------------+------------+-----------+--------------+-----------+
+	|   person   | pos_phone  |  phones_  | pos_country  | country_  |
+	+------------+------------+-----------+--------------+-----------+
+	| lingesh    | 0          | 96771     | 0            | IND       |
+	| lingesh    | 1          | 96771090  | 1            | USA       |
+	| lingesh    | 2          | 3         | 2            | CHN       |
+	| prashanth  | 0          | 86771     | 0            | NRI       |
+	| prashanth  | 1          | 971090    | 1            | AED       |
+	| prashanth  | 2          | 2         | 2            | RSA       |
+	| sudharsan  | 0          | 76771     | 0            | DOG       |
+	| sudharsan  | 1          | 96770     | 1            | CAT       |
+	| sudharsan  | 2          | 1         | 2            | PLI       |
+	| ramesh     | 0          | 66771     | 0            | BAR       |
+	| ramesh     | 1          | 960       | 1            | RAP       |
+	| ramesh     | 2          | 8783      | 2            | JOK       |
+	| subash     | 0          | 56771     | 0            | DHL       |
+	| subash     | 1          | 96        | 1            | CHN       |
+	| subash     | 2          | 83783     | 2            | BOM       |
+	| mani       | 0          | 46771     | 0            | ISU       |
+	| mani       | 1          | 90        | 1            | BOB       |
+	+------------+------------+-----------+--------------+-----------+
+
+--------------------------------------------------------------------------------------------------------------------
+'INLINE (array of structs)'
+	Explodes an array of structs to multiple rows. Returns a row-set with N columns (N = number of top level elements in the struct).
+
+Create a table with struct type columns in it and insert corresponding values:
+
+	CREATE TABLE cvdp.test_st ( person struct<id : int, name: string, organization : string>, activity struct<id : int, name: string>, cas struct<caseid : int, casename: string, caseorganization : string> )
+	ROW FORMAT SERDE 'org.apache.hadoop.hive.ql.io.orc.OrcSerde' STORED AS INPUTFORMAT 'org.apache.hadoop.hive.ql.io.orc.OrcInputFormat'  OUTPUTFORMAT  'org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat' 
+	LOCATION '/hdfs/path/testing_st' ;
+
+"NAMED_STRUCT is another function used to insert a value maually on array(struct<>) type columns"
+	INSERT INTO test_st SELECT NAMED_STRUCT('id',1,'name', 'pras', 'organization', 'it'),  NAMED_STRUCT('id',2,'name', 'pras2'), NAMED_STRUCT('caseid',3,'casename', 'pras3', 'caseorganization', 'it3') ;
+
+Actual data in the table is as below:
+	SELECT * FROM test_st;
+	+---------------------------------------------+--------------------------+----------------------------------------------------+
+	|                   person                    |         activity         |                        cas                         |
+	+---------------------------------------------+--------------------------+----------------------------------------------------+
+	| {"id":1,"name":"pras","organization":"it"}  | {"id":2,"name":"pras2"}  | {"caseid":3,"casename":"pras3","caseorganization":"it3"} |
+	+---------------------------------------------+--------------------------+----------------------------------------------------+
+	1 row selected (1.115 seconds)
+
+Use Inline function to flatten the structure:
+ 
+	SELECT pn.* , an.* , cn.* from test_st
+	LATERAL VIEW INLINE(array(person)) pn
+	LATERAL VIEW INLINE(array(activity)) an
+	LATERAL VIEW INLINE(array(cas)) cn;
+	+-----+-------+---------------+-----+--------+---------+-----------+-------------------+
+	| id  | name  | organization  | id  |  name  | caseid  | casename  | caseorganization  |
+	+-----+-------+---------------+-----+--------+---------+-----------+-------------------+
+	| 1   | pras  | it            | 2   | pras2  | 3       | pras3     | it3               |
+	+-----+-------+---------------+-----+--------+---------+-----------+-------------------+
+
+--------------------------------------------------------------------------------------------------------------------
+'JSON_TUPLE'
+	It takes a set of names (keys) and a JSON string, and returns a tuple of values using one function. This is much more efficient than calling GET_JSON_OBJECT to retrieve more than one key from a single JSON string.
+
+Example table has a json type in a column which is stored as string datatype:
+
+select cvdpx3_raw_x from NCVDPX3_ETISIDS_PART_NUM_PII_HTE limit 2;
+	+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--+
+	|                                                                                                                           cvdpx3_raw_x                                                                                                                            |
+	+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--+
+	| {"isConfig":"false","identifier":"\"F163\"","session_Open_Local":"\"2018-04-03T13:58:27+02:00\"","session_Open_UTC":"\"2018-04-03T13:58:27+02:00\"","ecu_name":"\"BCMB\"","VIN":"\"1FA6P8CF0F5360021\"","partNumber":"3","didType":"\"ECU_DIAGNOSTIC_SPEC\""}     |
+	| {"isConfig":"false","identifier":"\"F110\"","session_Open_Local":"\"2018-04-03T13:58:27+02:00\"","session_Open_UTC":"\"2018-04-03T13:58:27+02:00\"","ecu_name":"\"ABS\"","VIN":"\"1FA6P8CF0F5360021\"","partNumber":"\"DSGR3C-2C219-BA\"","didType":"\"OTHER\""}  |
+	+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--+
+
+select a.cvdpx3_sha_k, b.* from NCVDPX3_ETISIDS_PART_NUM_PII_HTE a lateral view json_tuple(a.cvdpx3_raw_x, 'identifier', 'ecu_name') b as f1, f2 limit 2;
+	+-------------------------------------------------------------------+---------+---------+--+
+	|                           cvdpx3_sha_k                            |   f1    |   f2    |
+	+-------------------------------------------------------------------+---------+---------+--+
+	| 0116c2761be5c61020d5205e737eec4385581bb260f7f0ee3a50e98298a2249b  | "F163"  | "BCMB"  |
+	| 014918d61cd288be0d61ff9bbb4feb6c3746129fb5af91c53b98a09e3164f981  | "F110"  | "ABS"   |
+	+-------------------------------------------------------------------+---------+---------+--+
+
+'get_json_object' <-- general string function
+	
+The above desired output can be formed using this function which has more lines and needs to be called everytime to get every sinlge value from JSON.
+
+select a.cvdpx3_sha_k, get_json_object(a.cvdpx3_raw_x, '$.identifier') as f1 , get_json_object(a.cvdpx3_raw_x, '$.ecu_name') as f2 from NCVDPX3_ETISIDS_PART_NUM_PII_HTE a limit 2;
+	+-------------------------------------------------------------------+---------+---------+--+
+	|                           cvdpx3_sha_k                            |   f1    |   f2    |
+	+-------------------------------------------------------------------+---------+---------+--+
+	| 0116c2761be5c61020d5205e737eec4385581bb260f7f0ee3a50e98298a2249b  | "F163"  | "BCMB"  |
+	| 014918d61cd288be0d61ff9bbb4feb6c3746129fb5af91c53b98a09e3164f981  | "F110"  | "ABS"   |
+	+-------------------------------------------------------------------+---------+---------+--+
+	2 rows selected (0.135 seconds)
+
+-----------------------------------------------------------------------------------------------
+Complex Types null inserts:
+
+	To insert a null values in complex types such as nested struct<array<struct columns. 
+	
+	cvdpdk_atr_id_code_value struct<attributes:array<struct<atr_id:bigint,
+														atr_code:varchar(20),
+														value:string>>>
+														
+	Direct setting of NULL will result in below error:
+	FAILED: SemanticException [Error 10044]: Line 1:12 Cannot insert into target table because column number/types are different 'tablename': 
+			Cannot convert column 73 from void to struct<ATTRIBUTES:array<struct<ATR_ID:bigint,ATR_CODE:varchar(20),VALUE:string>>>. (state=42000,code=10044)
+	
+	To Fix this use: 
+	
+	insert into select named_struct('attributes',
+									array(named_struct('ATR_ID', cast(null as bigint),
+														'ATR_CODE', cast(null as varchar(20)),
+														'VALUE',cast(null as string)))) as cvdpdk_atr_id_code_value from source_table;
+
+
+-----------------------------------------------------------------------------------------------
+====================
+`SET PARAMETERS - HIVE`
+
+"Eliminates map and Reduce jobs" - Hive queries can utilize fetch task (directly read from disk), which can avoid the overhead of starting MapReduce job.
+	
+	'hive.fetch.task.conversion': This parameter controls which kind of simple query can be converted to a single fetch task, thus eliminating Map jobs.
+	
+		It was added in Hive 0.10 per HIVE-2925. 
+	    Value "none" is added in Hive 0.14 to disable this feature, per HIVE-8389.
+	    Value "minimal" means SELECT *, FILTER on partition columns (WHERE and HAVING clauses), LIMIT only.
+	    Value "more" means SELECT, FILTER, LIMIT only (including TABLESAMPLE, virtual columns)."more" can take any kind of expressions in the SELECT clause, including UDFs.
+
+	    We can see "Fetch Operator" being used in explain plans under "STAGE PLANS" section if this parameter is enabled. 
+	    "NOTE: fetch can not utilize the parallelism of MapReduce framework."
+
+	'hive.fetch.task.conversion.threshold' : this parameter controls input threshold (in bytes) for applying hive.fetch.task.conversion
+											 The default value was changed in Hive 0.14 to 1GB(1073741824). To disable this feature set the values as -1.
+		
+		If hive.fetch.task.conversion.threshold is less than the table size, it will use MapReduce Job (in otherwords, if table size is greater than 1G (defaultvalue) use Mapreduce instead of Fetch task.)
+
+
+    'hive.fetch.task.aggr': Eleminates the reduce job when using "aggregation queries with no group-by clause" (for example, select count(*) from src) execute final aggregations in a single reduce task. 
+    						If this parameter is set to true, Hive delegates the final aggregation stage to a fetch task, possibly decreasing the query time.
+
+	    > set hive.fetch.task.aggr; 
+		+-----------------------------+--+
+		|             set             |
+		+-----------------------------+--+
+		| hive.fetch.task.aggr=false  |		<-- initial value is false
+		+-----------------------------+--+
+		
+	    > select count(*) from NCVDPX3_ETISIDS_PART_NUM_PII_HTE;
+		--------------------------------------------------------------------------------
+		        VERTICES      STATUS  TOTAL  COMPLETED  RUNNING  PENDING  FAILED  KILLED
+		--------------------------------------------------------------------------------
+		Map 1 ..........   SUCCEEDED      5          5        0        0       0       0
+		Reducer 2 ......   SUCCEEDED      1          1        0        0       0       0  <-- Usgae of reducers 
+		--------------------------------------------------------------------------------
+		VERTICES: 02/02  [==========================>>] 100%  ELAPSED TIME: 7.43 s
+		--------------------------------------------------------------------------------
+		+------+--+
+		| _c0  |
+		+------+--+
+		| 134  |
+		+------+--+
+		1 row selected (8.156 seconds)
+		
+		> set hive.fetch.task.aggr=true; <-- enabling by setting the value to true
+		No rows affected (0.004 seconds)
+		
+		> select count(*) from NCVDPX3_ETISIDS_PART_NUM_PII_HTE;
+		--------------------------------------------------------------------------------
+		        VERTICES      STATUS  TOTAL  COMPLETED  RUNNING  PENDING  FAILED  KILLED
+		--------------------------------------------------------------------------------
+		Map 1 ..........   SUCCEEDED      5          5        0        0       0       0
+		--------------------------------------------------------------------------------	<-- No reducers used 
+		VERTICES: 01/01  [==========================>>] 100%  ELAPSED TIME: 11.44 s
+		--------------------------------------------------------------------------------
+		+------+--+
+		| _c0  |
+		+------+--+
+		| 134  |
+		+------+--+
+		1 row selected (12.189 seconds)
+
+	"Note, if the query has "group-by", it can not use this feature"
+
+	'hive.strict.managed.tables' - mode in Hive 3 which enforces that all managed(internal) tables are transactional (both full or insertonly tables allowed). 
+									Non-transactional tables, as well as non-native tables, must be created as external tables when this mode is enabled.
+
+		So altering the table from EXTERNAL to INTERNAL is not possible in Hive 3. it will throw below error:
+			--Error: Error while processing statement: FAILED: Execution Error, return code 1 from org.apache.hadoop.hive.ql.exec.DDLTask. 
+			--Unable to alter table. Table cvdp.ncvdpux_fordpass_appr_trn_recogn_tier_pii_hte failed strict managed table checks due to the following reason:
+			--Table is marked as a managed table but is not transactional. (state=08S01,code=1)
+
+	
+	hive.root.logger =DEBUG,console - if set All info will get printed in console
+	hive.cli.print.header - if set to true it will print headers for output results
+	hive.server2.logging.operation.enabled - default true in hive2 - When set to false it wont show operation logs (like info, warn)
+
+	hive.support.quoted.identifiers=NONE; - used to enable this type of query -- select `(r_num)?+.+` from (select row_number() over (partition by cust.cvdp72_cust_d_2) as r_num from table where v1.r_num=1;
+
+	set hive.mapred.mode=nonstrict;
+	set hive.execution.engine=tez;
+	set hive.support.concurrency=true;
+	set hive.exec.dynamic.partition=true;
+	set hive.enforce.bucketing=true;
+	set hive.exec.dynamic.partition.mode=nonstrict;
+	set mapreduce.map.java.opts=Xmx12144m;
+	set hive.exec.max.dynamic.partitions=1000000;
+	set hive.exec.max.dynamic.partitions.pernode=1000000;
+	set hive.auto.convert.join=true;
+	set hive.optimize.sort.dynamic.partition=true;
+	set tez.grouping.min.size=544874240;
+	set tez.grouping.max.size=644874240;
+
+	set hive.tez.container.size=32786;
+	set tez.am.resource.memory.mb=32786;
+	set hive.exec.orc.split.strategy=BI;
+	set hive.orc.cache.use.soft.references=true;
+	set hive.exec.parallel=true;
+
+	set hive.exec.compress.output=true;
+	set hive.cbo.enable=true;
+	set hive.compute.query.using.stats=true;
+
+
+
+=============================================================================
+`SCALA`
+
+scala -version --> to verify 
+
+val -- declare a immutable variable
+var -- declare a mutable variable. the variable can be reassigned
+lazy val -- the value to the variable will not assigned until it is being called. same as lazy evaluation 
+		 |--use to save memory to declared prior 
+
+
+object MyFuncs {
+	def sum(func: Int => Int, lb: Int, ub: Int)  = {
+  	var t= 0
+  	for (i <- lb to ub) {
+  		t += func(i)
+  		}
+	t
+	}
+
+	def sqr (i: Int) = i * i
+	def cube (i: Int) = i * i * i
+}
+
+scala> case class Odc(oid: Int, odt: String,cid: Int,ost: String) {
+     | println("hello")
+     | }
+defined class Odc
+
+scala> val newOdc = new Odc(1,"2018-10-10",100,"COMPLETE")
+hello
+newOdc: Odc = Odc(1,2018-10-10,100,COMPLETE)
+
+scala> newOdc.oid
+res16: Int = 1
+
+---
+Create a list of values - square them and add them
+l: List[Int] = List(1, 2, 3, 4, 5)
+
+scala> val f = l.map(xx => xx * xx)
+f: List[Int] = List(1, 4, 9, 16, 25)
+
+scala> val m = f.reduce((x,y) => x+y)
+m: Int = 55
+
+functions:
+
+'MONAD'  -->https://medium.com/@sinisalouc/demystifying-the-monad-in-scala-cc716bb6f534
+'option'
+'trait'
+:+
+
+
+`PYTHON`:
+--------
+	python -m tabnanny yourfile.py <-- to check intendation errors in python code
+
+	'try' and 'exception' --> https://www.programiz.com/python-programming/exception-handling
+
+	`ANACONDA`
+		conda create --name env_name
+		conda install gpudb=7.0.16.0
+		conda list
+		
+		if Anaconda path involes  both .local sitepackages and.conda site-packages, python loads the one in .local.
+		>>sys.path
+		  ['/u/cvdpqap/.local/lib/python3.6/site-packages', '/u/cvdpqap/.conda/envs/gpudb_py/lib/python3.6/site-packages']
+		
+		to change this behaviour, before activating the env enter export PYTHONNOUSERSITE=0, to remove the .local/site-packages from sys.path.
+		1. export PYTHONNOUSERSITE=True before the conda activate call successfully isolated the conda environment from global/user site packages for me.
+
+		2. On the other hand, entering export PYTHONNOUSERSITE=0 allows the conda environment to be reintroduced to the user site packages.
+	
+		or 
+		
+		1. export PYTHONPATH="/u/cvdpqap/.conda/envs/gpudb_py/lib/python3.6/site-packages:$PYTHONPATH"
+			in this though the sys.path shows .local/site-packages it will take the one is .conda/site-packages
+		
+		
+===============================================================
+`SPARK`:
+--------
+
+spark-shell --verbose --master yarn --driver-memory 512m --num-executors 1 --executor-cores 2 --executor-memory 512m
+
+`Spark - CONF parameters`
+------------------------
+	spark.locality.wait - Max number like 50 for Large data sets, bcoz cost of having to transfer large amounts of data across the network can be quite expensive.
+						- Min like 0 or 3 For small data sets, the cost of shuffling the data around the cluster is relatively inexpensive 
+
+	--> https://support.datastax.com/hc/en-us/articles/208237373-FAQ-When-is-it-a-good-idea-to-set-Spark-locality-wait-to-zero-
+
+
+`Hive warehouse Connector` 
+		https://community.cloudera.com/t5/Community-Articles/Integrating-Apache-Hive-with-Apache-Spark-Hive-Warehouse/ta-p/249035
+		https://docs.cloudera.com/HDPDocuments/HDP3/HDP-3.1.5/integrating-hive/content/hive-read-write-operations.html
+		https://blog.cloudera.com/hive-warehouse-connector-use-cases/
+		http://docs.hortonworks.com.s3.amazonaws.com/HDPDocuments/HDP3/HDP-3.0.0/integrating-hive/content/hive_hivewarehousesession_api_operations.html
+		https://community.cloudera.com/t5/Support-Questions/HDP-3-1-Spark-2-3-2-hive-table-quot-default-table1-quot-show/td-p/240071
+
+
+Things to consider while write.toFile case --> https://blog.scottlogic.com/2018/03/22/apache-spark-performance.html
+
+spark -version -> to find the version of the spark
+
+//Initialize programatically - v1.6
+	import org.apache.spark.{SparkConf, SparkContext}
+	val conf = new SparkConf().setAppName("anyName").setMaster("yarn")
+	val sc = new SparkContext(conf)
+
+//To create SqlContext 
+	scala> import org.apache.spark.sql
+	scala> val sqlc = new org.apache.spark.sql.SQLContext(sc)
+	sqlc: org.apache.spark.sql.SQLContext = org.apache.spark.sql.SQLContext@614c7175
+
+// v2
+	from pyspark.context import SparkContext
+	from pyspark.sql.session import SparkSession
+	sc = SparkContext.getOrCreate()
+	spark = SparkSession(sc)
+	
+//To list the environment details of spark which is already running 
+	
+'spark scala'
+	sc.getConf.getAll <-- list all together
+	sc.getConf.getAll.foreach(println) <-- prints line by line
+	spark.sparkContext.getConf.get("spark.sql.files.maxPartitionBytes") <--get selected conf
+'pyspark'
+	spark.sparkContext.getConf().getAll() <-- list all together
+	for item in sorted(sc._conf.getAll()): print(item) <-- print line by line
+	for item in sorted(spark.sparkContext.getConf().getAll()): print(item)
+	spark._conf.get("spark.app.name") <--get selected conf
+
+ //spark-shell enables Hive support by default
+ 	scala> sqlc.getAllConfs.contains("spark.sql.catalogImplementation")
+ 	res3: Boolean = true
+
+ // Set hive and HDFS proprties in spark
+ 	In a Spark cluster running on YARN, these configuration files are set cluster-wide, and cannot safely be changed by the application.
+
+	The better choice is to use spark hadoop properties in the form of spark.hadoop.*, and use spark hive properties in the form of spark.hive.*. 
+	For example, adding configuration “spark.hadoop.abc.def=xyz” represents adding hadoop property “abc.def=xyz”,
+	 and adding configuration “spark.hive.abc=xyz” represents adding hive property “hive.abc=xyz”. 
+
+//check if a file is in hdfs or not:
+	fs = sc._jvm.org.apache.hadoop.fs.FileSystem.get(sc._jsc.hadoopConfiguration())
+	fs.exists(sc._jvm.org.apache.hadoop.fs.Path("/tmp/recordsWithFilename.csv/_SUCCESS"))
+	
+	fileopen = Popen(f'hdfs dfs -stat "%n" {input_path}/*',shell=True, stdout = PIPE, universal_newlines=True).communicate()
+	if fileopen[0] != '': --> true means files present inside the folder
+		filename = fileopen[0].strip('\n')
+	
+	//listing a directory
+		URI           = sc._gateway.jvm.java.net.URI
+		Path          = sc._gateway.jvm.org.apache.hadoop.fs.Path
+		FileSystem    = sc._gateway.jvm.org.apache.hadoop.fs.FileSystem
+		Configuration = sc._gateway.jvm.org.apache.hadoop.conf.Configuration
+		fs = FileSystem.get(URI("hdfs://hdd3cluster:8020"), Configuration())
+		status = fs.listStatus(Path('/tmp/recordsWithFilename.csv/'))
+		for fileStatus in status:
+			print(fileStatus.getPath())
+			
+	another way:
+		hadoop = sc._jvm.org.apache.hadoop
+		fs = hadoop.fs.FileSystem
+		conf = hadoop.conf.Configuration()
+		path = hadoop.fs.Path('/tmp/recordsWithFilename.csv/')
+		[str(f.getPath()) for f in fs.get(conf).listStatus(path)]
+
+=====
+`RDD (resilient distributed datasets)`
+===== RDD is an immutable collection of distributed objects/elements partitioned across the nodes of clusters and operated on in parallel. Features are immutable, inmemory computation, lazy evaluations, Fault tolerance, Partitioning. 
+
+	RDD operation: Transformations - Creating a new RDD from an existing RDD is known as transformation. Ex: map, flatMap
+		Actions - all the transformations are triggered only when an action is called. Ex: sum, count.
+		
+`RDD Creation` 
+	'Using parallized collection' - it can be created by applying parallelize method on an existing collection.
+		val data = Array(1,2,3,4,5)
+		val rddData = sc.parallelize(data)
+		rddData.collect() 
+
+	'Using External Sources' - Use textFile() of SparkContext.
+		val rdd = sc.textFile("hdfs://localhost:9000/data/keywords.txt")
+
+	'Read data from HDFS' - it creates a RDD
+		scala> val orders = sc.textFile("/user/hduser/retail_db/orders")
+			orders: org.apache.spark.rdd.RDD[String] = /user/hduser/retail_db/orders MapPartitionsRDD[27] at textFile at <console>:25
+
+	'Read data from Linux FS' 
+		scala> val ordersRaw = scala.io.Source.fromFile("/home/hduser/retail_db/orders") <-- Itenory type - to change this to RDD use parallelize method.
+		scala> val ordersRDD = sc.parallelize(ordersRaw)
+				
+	'Creating an RDD with file Partitioning':  By default, it divides data into two partitions also the num of partitions is equal to the num of CPU cores available in the cluster, but the number of partitions can be specified while creating an RDD.
+		val rdd = sc.textFile("home/data/keywords.txt", 3)
+
+`Transformations`
+	'map'- acts on one element and produces one element. Returns a new data set by operating on each element of the source RDD.
+		MAP o/p is of type - org.apache.spark.rdd.RDD[Array[String]] = MapPartitionsRDD[8]
+
+		val orderDate = orders.map(mm => {
+     	| (mm.split(",")(1).substring(0, 10).replace("-", "").toInt, mm.split(",")(0).toInt)
+     	| })
+
+   	'flatmap' - acts on one element and produces 0 or 1 or more elements and it flattens list of lists into a single list
+     	 	flatmap o/p is of type -   org.apache.spark.rdd.RDD[String] = MapPartitionsRDD[9] at flatMap
+		val l = List("Hello", "How are you doing", "Let us perform copy","dont copy", "as part of count program","how is everything")
+		val lst = List("Hello,Hello", "Hello,Hello")
+		val lstRdd = sc.parallelize(lst)
+		val lstFm = lstRdd.flatMap(mm => mm.split(","))
+		val wc = lstFm.map(mm => (mm, 1)).countByKey
+
+	'filter' -  Returns a new RDD that contains only elements that satisfy the condition.
+		val rdd = sc.textFile("/home/data/keywords.txt")
+		val filterRdd = rdd.filter(line => line.contains("Kafka"))
+		filterRdd.collect()
+		
+	'joinfunc' - Join needs a paired RDD to join two dataset. key value (primarykey) should be similar
+
+		val joi = sc.textFile("/user/hduser/retail_db/order_items")
+		val ordersMap = jo.map(mm => (mm.split(",")(0).toInt, mm.split(",")(1).substring(0,10)))
+		val orderItemMap = joi.map(mm => (mm.split(",")(1).toInt,mm.split(",")(4).toFloat))
+		val join = ordersMap.join(orderItemMap)
+		join.take(10).foreach(println)
+
+	'leftouterjoin'
+		val leftOuterJoin = ordersMap.leftOuterJoin(orderItemMap)
+		val leftouterjoinfilter = leftOuterJoin.filter( mm => mm._2._2 == None)
+		val final = leftouterjoinfilter.map(mm => mm._2._1)
+
+	
+`Actions`: Action returns values to the driver program.
+
+	'reduce(func)' - returns a data set by aggregating the elementsof the data set using a function func. 
+			The function takes two arguments and returns a single argument.
+		val rdd = sc.parallelize(1 to 5) 
+		val sumRdd = rdd.reduce((t1,t2) => t1 + t2)
+		
+	'collect()' - All the elements of the data set are returned as an array to the driver program. Collect will convert the distributed RDD in to a single threaded collection. Collect will attempt to copy every single element in the RDD onto the single driver program, and then run out of memory and crash. use take() or takeSample() api as collect will cause memory realated issue as collect api uses heavy memory.
+	
+	'count()' - This returns the number of elements in the data set.
+	
+	'first()' -  This returns the first element in the data set.
+	
+	'take(n)' - This returns the first n elements in the data set as an array.
+	
+	'saveAsTextFile(path)' - Write the elements of the RDD as a text file in the local file system, HDFS, or another storage system.
+	
+	'foreach' - If we apply foreach directly on RDD - it will not return anything. Because spark apis will be executed in worker nodes where the apis we are performing on the arrays will be excuted in current session/machine where we running it.
+
+`Paired RDDs`:
+	 Each element in the pair RDDs is represented as a key/value pair. Pair RDDs are useful for sorting, grouping.
+
+	'groupByKey' - doesnt take any arguments to be passed, doesnot use combiner 
+			In groupByKey(), all the key-value pairs are shuffled around. This is a lot of unnecessary data to being transferred over the network.
+		val words = Array("one", "two", "two", "three", "three", "three")
+		val wordPairsRDD = sc.parallelize(words).map(word => (word, 1))
+		val wordCountsWithGroup = wordPairsRDD
+		.groupByKey()
+		.map(t => (t._1, t._2.sum))
+		.collect()
+		
+	'reduceByKey' - works much better on a large dataset. Thats because Spark knows it can combine output with a common key on each partition before shuffling the data. pairs on the same machine with the same key are combined (by using the lamdba function passed into reduceByKey) before the data is shuffled. Then the lamdba function is called again to reduce all the values from each partition to produce one final result
+		val words = Array("one", "two", "two", "three", "three", "three")
+		val wordPairsRDD = sc.parallelize(words).map(word => (word, 1))
+		val wordCountsWithReduce = wordPairsRDD
+		.reduceByKey(_ + _)
+		.collect()
+	
+	'combineByKey' - It can be used when you are combining elements but your return type differs from your input value type.
+	
+	'sortByKey()' - applied on a data set of (K, V) pairs, it returns a data set of (K, V) pairs where keys are sorted in ascending or descending order as specified in the boolean ascending argument. 
+		val rdd = sc.textFile("/home/data/people.csv")
+		val splitRdd = rdd.filter(line => !line.contains("year")).map(line => line.split(","))
+		val fieldRdd = splitRdd.map(f => (f(1),f(3).toInt)).sortByKey(false) <- false represents that the data to be sorted in desc order
+		fieldRdd.foreach(println)
+	#
+	
+`Lineage` -  RDD lineage is nothing but the graph of all the parent RDDs of an RDD. it creates a logical execution plan.
+			To view the lineage, use toDebugString
+		>> rdd.toDebugString
+		
+`DAG - 'Direct Acylic Graph'`:
+	 Phy exec plan.  When an action is called on the RDD, Spark creates the DAG and submits the DAG to the DAG scheduler.
+		1. The DAG scheduler divides operators such as map, flatMap, and so on, into stages of tasks.
+	 	2. The result of a DAG scheduler is a set of stages.
+		3. The stages are passed on to the Task Scheduler.
+		4. The Task Scheduler launches tasks via Cluster Manager.
+		5. The worker executes the tasks.
+	At a high level, Spark applies two transformations to create a DAG. The two transformations are as follows:
+		• 'Narrow transformation:' The operators that don’t require the data to be shuffled across the partitions are grouped together as a stage.
+			Examples are map, filter, and so on.
+		• 'Wide transformation:' The operators that require the data to be shuffled are grouped together as a stage. An example is reduceByKey
+
+`Persisting RDD`:  Persisting an RDD stores the computation result in memory and reuses it in other actions on that data set. 
+	'cache()' - Uses the default storage level is StorageLevel.MEMORY_ONLY -> RDD is stored as deserialized Java object in the JVM. If the size of RDD is 			greater than memory, It will not cache some partition and recompute them next time whenever needed. 
+			
+	'persist()' - we can use various storage levels in this method as follows 
+		1. MEMORY_AND_DISK -> 'When the size of RDD is greater than the size of memory, it stores the excess partition on the disk, and retrieve from disk whenever required',
+		2. MEMORY_ONLY_SER, 3. MEMORY_AND_DISK_SER, 4. DISK_ONLY
+		
+		>> val units = words.map ( word => (word, 1) ).persist(StorageLevel.MEMORY_ONLY) or
+		>> val units = words.map ( word => (word, 1) ).cache
+	
+	'unpersist()' - Spark monitor the cache of each node automatically and drop out the old data partition in the LRU (least recently used) fashion.
+					We can also remove the cache manually using RDD.unpersist() method.
+
+	'to purge all cached objects' - spark.catalog.clearCache()
+
+
+	#Refer ( https://data-flair.training/blogs/apache-spark-rdd-persistence-caching/ ) 
+
+==========
+`SparkSQL` - The Spark SQL module consists of DataFrames and Datasets and Catalyst Optimizer.
+==========	
+`DataFrame` - A DataFrame is an immutable, distributed collection of data that is organized into rows, where each one consists set of columns which has name and type. In other words, this distributed collection of data has a structure defined by a schema. 
+
+`Creating DataFrames`
+	'Creating DataFrames from RDDs': 
+		"To use toDF function we need to import implicit modules" . 
+		IMPLICITS - Used for converting Scala objects (incl. RDDs) into a Dataset, DataFrame, Columns or supporting such conversions. implicits object is defined inside SparkSession and hence requires that you build a SparkSession instance first before importing implicits conversions.
+		
+		>> import org.apache.spark.sql.SparkSession
+		>> val spark: SparkSession = new SparkSession.builder.master("local[*]").enableHiveSupport().config("spark.sql.warehouse.dir", "target/spark-warehouse").setAppName("someName").getOrCreate()
+		>> import spark.implicits._
+		>>
+		>> val df = Seq("SOME DATA!").toDF("columnName")
+		>> val df2 = sc.parallelize(Seq("hello, I'm a very low-level RDD")).toDF
+		>> import scala.util.Random
+		>> val rdd2 = spark.sparkContext.parallelize(1 to 10).map(x => (x,Random.nextInt(100)* x))
+		>> val kvDF = rdd2.toDF("key","value")
+	Printing the Schema and Showing the Data of a DataFrame
+		>> kvDF.printSchema
+			|-- key: integer (nullable = false)
+			|-- value: integer (nullable = false)
+		>> kvDF.show(2)
+			+---+-----+
+			|key|value|
+			+---+-----+
+			| 1| 58	  |
+			| 2| 18   |
+			+---+-----+
+		>> spark.range(5,15,2).toDF("num").show  //spark.range itself results in RDD
+		
+	'Converting a Collection Tuple to a DataFrame Using Spark’s toDF Implicit':
+		>> val movies = Seq(("Damon, Matt", "The Bourne Ultimatum", 2007L),("Damon, Matt", "Good Will Hunting", 1997L))
+		>> val moviesDF = movies.toDF("actor", "title", "year")
+		>> moviesDF.printSchema
+			|-- actor: string (nullable = true)
+			|-- title: string (nullable = true)
+			|-- year: long (nullable = false)
+		>> moviesDF.show
+			+-----------+--------------------+----+
+			| actor		| title				 |year|
+			+-----------+--------------------+----+
+			|Damon, Matt|The Bourne Ultimatum|2007|
+			|Damon, Matt| Good Will Hunting  |1997|
+			+-----------+--------------------+----+
+			
+	'Creating a DataFrame from an RDD with a Schema Created Programmatically'
+		>> import org.apache.spark.sql.Row
+		>> import org.apache.spark.sql.types._		<-- required to using types in schema creation
+		>> val peopleRDD = spark.sparkContext.parallelize(Array(Row(1L, "John Doe", 30L), Row(2L, "Mary Jane", 25L)))
+		>> val schema = StructType(Array(StructField("id", LongType, true),StructField("name", StringType, true),StructField("age", LongType, true) ))
+		>> val peopleDF = spark.createDataFrame(peopleRDD, schema)
+	Displaying the Schema of peopleDF and Its Data
+		>> peopleDF.printSchema
+		|-- id: long (nullable = true)
+		|-- name: string (nullable = true)
+		|-- age: long (nullable = true)
+		>> peopleDF.show
+		+--+-----------+---+
+		|id| name     |age |
+		+--+-----------+---+
+		| 1| John Doe | 30 |
+		| 2| Mary Jane| 25 |
+		+--+-----------+---+
+		
+	'Creating DataFrames from Data Sources':
+		General format - >> spark.read.format(...).option("key", "value").schema(...).load()
+	'txt file' 
+		#reading data from text file separated by | symbol and creating DF on it. Considering the 3rd column is Integer (total 4 columns).
+    	>> val rawInput = sc.textFile("text.txt")
+	
+    	>> val df1= rawInput.map(x => x.split("|")).map( x=> (x(0),x(1),x(2).toInt,x(3)) ).toDF("tbl_nm", "plnt_nm", "pk_nm", "log")
+    	>> val df2 = rawInput.map(mm => mm.split("|")).map {case Array(a,b,c,d) => (a,b,c.toInt,d)}.toDF("tbl_nm","plnt_nm","pk_nm","log")
+    	 
+    	>> case class Schema(tbl_nm: String, plnt_nm: string, pk_nm: Int, log: string)
+    	>> val df3= rawInput.map(x => x.split("|")).map( x=> Schema(x(0),x(1),x(2),x(3)) ).toDF()
+    	 
+    	>> import org.apache.spark.sql.types.{StructType,StructField,StringType}
+    	>> val schema = StructType(Array(
+    	        StructField("id", LongType, true),
+    	        StructField("name", StringType, true),
+    	        StructField("age", LongType, true) ))
+    	>> val df4 = spark.createDataFrame(rawInput, schema)
+    	
+    	>> df4.printSchema
+    	 
+    We use 'registerTempTable' or CreateOrReplaceTempView/createGlobalTempView (Spark > = 2.0) on our spark Dataframe.
+      'CreateorReplaceTempView' is used when you want to store the table for a particular spark session and 
+      'createGlobalTempView' is used when you want to share the temp table across multiple spark sessions.
+    
+    	>> df1.registerTempTable("SampleTable")
+       	>> sqlContext.sql("select count(1) from SampleTable").show
+    
+    Inspect RDD Partitions Programatically
+    	In the Scala API, an RDD holds a reference to its Array of partitions, which you can use to find out how many partitions there are:
+    
+    	>> scala> val someRDD = sc.parallelize(1 to 100, 30)
+    	   someRDD: org.apache.spark.rdd.RDD[Int] = ParallelCollectionRDD[0] at parallelize at <console>:12
+    
+    	>> scala> someRDD.partitions.size
+    	   res0: Int = 30
+    	In the python API, there is a method for explicitly listing the number of partitions:
+    
+    	>> scala> someRDD = sc.parallelize(range(101),30)
+    
+    	>> scala> someRDD.getNumPartitions()
+    	>> res1: 30
+
+
+	'CSV format'
+		>> import org.apache.spark.sql.types._
+		>> val movieSchema = new StructType().add("actor",SringType,true).add("title",StringType,true).add("year",IntegerType,true)
+		>> val movies4 = spark.read.option("header","true").option("sep", "\t").option("mode", "PERMISSIVE").schema(movieSchema).csv("<path>/movies.csv")
+		
+	"inferSchema" option -  specifies whether Spark should try to infer the column type based on column value. Or we can define user-specified-schema using StructType and StructField & specify in schema option as above line. If the inferSchema option is false and no schema is provided, Spark will assume the data type of all the columns to be the string type.
+		
+	"Verify correctness of the data":
+		'PERMISSIVE (default)': nulls are inserted for fields that could not be parsed correctly.
+			We can add a special column _corrupt_record, which does not exist in the data. This column captures rows that did not parse correctly. To Query which rows not parsed correctly we can use the below codes:
+				>> spark.read.schema(schema).csv(file).filter($"_corrupt_record".isNotNull).count()
+				>> spark.read.schema(schema).csv(file).select("_corrupt_record").show()
+		'DROPMALFORMED': drops lines that contain fields that could not be parsed
+		'FAILFAST': aborts the reading if any malformed data is found
+			
+	'JSON file'
+		>> val orders = sqlContext.load("/user/hduser/retail_db_json/orders", "json")
+			orders: org.apache.spark.sql.DataFrame = [order_customer_id: bigint, order_date: string ... 2 more fields]
+		"JSON Common Options" -> allowComments, multiLine, samplingRatio  	
+
+		>> val movies5 = spark.read.option("multiLine","true").option("nferSchema","true").schema(movieSchema2).json("<path>/movies.json")  //specify a schema to override the Sparks inferring schema.
+	'When a column data type specified in the schema doesn’t match up with the value in the JSON file?, it will set the value of all the columns in that row to null. Instead of getting null values, you can tell Spark to fail fast'
+		>> val movies8 = spark.read.option("mode","failFast").schema(badMovieSchema).json("<path>/movies.json")
+	Spark will throw a RuntimeException when executing an action
+		>> movies8.show(5)
+			ERROR Executor: Exception in task 0.0 in stage 3.0 (TID 3) java.lang.RuntimeException: Failed to parse a value for data type BooleanType (current token: VALUE_STRING).
+
+	'Creating DataFrames from JDBC':
+		For Spark to connect to an RDBMS, it must have access to the JDBC driver JAR file at runtime. Therefore, you need to add the location of a JDBC driver to the Spark classpath.
+		//Main Options for a JDBC Data Source - url, dbtable, driver
+		
+		>> val mysqlURL= "jdbc:mysql://localhost:3306/db"
+		>> val filmDF = spark.read.format("jdbc")
+						.option("driver", "com.mysql.jdbc.Driver")
+						.option("url", mysqlURL)
+						.option("dbtable", "film")
+						.option("user", "<username>")
+						.option("password","<password>")
+						.load()
+
+	'Creating DataFrames from .db file using JDBC and panda'
+	Add additional/necessary jars if required by the following methods:
+
+	1. /etc/spar/conf/spark-defaults.conf file setup
+		spark.driver.extraClassPath = C:/tmp/vsAngular2/spark/bin/sqlite-jdbc-3.8.7.jar
+		spark.executor.extraClassPath = C:/tmp/vsAngular2/spark/bin/sqlite-jdbc-3.8.7.jar
+
+	2. If you want to add a .jar to the classpath after you have entered spark-shell, use :require. Like:
+		scala> :require /path/to/file.jar
+		Added '/path/to/file.jar' to classpath.
+
+	3. While initializing spark shell itself
+		./spark-shell --jars pathOfjarsWithCommaSeprated
+
+	Using panda method:
+
+		import sqlite3
+		import pandas as pd
+		db_path = '/tmp/RSM/InterpidWivi/V362.db'
+		query = "SELECT name FROM sqlite_master WHERE type='table';" <-- to list the tables in that .db file
+		conn = sqlite3.connect(db_path)
+		a_pandas_df = pd.read_sql_query(query, conn)
+		a_spark_df = sqlContext.createDataFrame(a_pandas_df)
+
+		In cluster mode, the local directories used by the Spark executors and the Spark driver will be the local directories configured for 
+		YARN (Hadoop YARN config yarn.nodemanager.local-dirs). If the user specifies spark.local.dir, it will be ignored. 
+
+		In client mode, the Spark executors will use the local directories configured for YARN while the Spark driver will use those defined in spark.local.dir.
+		This is because the Spark driver does not run on the YARN cluster in client mode, only the Spark executors do.
+
+	The '--files' and '--archives' options support specifying file names with the numbr similar to Hadoop. 
+	For example, you can specify: --files localtest.txt#appSees.txt and this will upload the file you have locally named localtest.txt
+	into HDFS but this will be linked to by the name appSees.txt, and your application should use the name as appSees.txt to reference it when running on YARN.
+
+	Using jdbc method:
+	
+	spark-shell --jars /tmp/l7/scala/sqlite-jdbc-3.15.1.jar --files /tmp/RSM/V362.db#sqllite.db
+
+		val df = spark.read.format("jdbc").options(
+		  Map(
+		    "url" -> "jdbc:sqlite:sqllite.db",
+		    "dbtable" -> "sqlite_master",
+		    "driver" -> "org.sqlite.JDBC")).load()
+
+		    val df = spark.read.format("jdbc").options(
+		  Map(
+		    "url" -> "jdbc:sqlite:V362.db",
+		    "dbtable" -> "main.channels",
+		    "driver" -> "org.sqlite.JDBC")).load()
+
+		sqlContext.read.format("jdbc").options(url ="jdbc:sqlite:c:/tmp/vsAngular2/data/test.db", driver="org.sqlite.JDBC", dbtable="employee").load().take(10) 
+
+
+	'Creating DataFrame from S3':
+		There are no S3 libraries in the core Apache Spark project. Spark uses libraries from Hadoop to connect to S3.
+
+		1. Specify the credentials in a configuration file, such as core-site.xml: 
+			<property>
+		    	<name>fs.s3a.access.key</name>
+			    <value>...</value>
+			</property>
+			<property>
+ 				<name>fs.s3a.secret.key</name>
+    			<value>...</value>
+			</property>
+
+		Initialize the session
+			>> import org.apache.hadoop.fs.{FileSystem, Path}
+			>> import org.apache.hadoop.conf.Configuration
+			>> val spark = SparkSession.builder.appName("SUsingS3").getOrCreate()
+ 		Create an RDD from a file in S3 using the s3n protocol
+			>> val s3nRdd = sc.textFile("s3n://sparkour-data/random_numbers.txt")
+
+		2. AWS credentials inline in the S3N URI:
+
+			>> val lyrics = sc.textFile("s3n://MyAccessKeyID:MySecretKey@bucketname/Filename.txt")
+
+		3. Configuring AWS Credentials in SparkContext:
+			>> val hadoopConf = sparkContext.hadoopConfiguration
+			>> hadoopConf.set("fs.s3.impl", "org.apache.hadoop.fs.s3native.NativeS3FileSystem")
+			>> sc.hadoopConfiguration.set("fs.s3n.awsAccessKeyId", s3Key)
+			>> sc.hadoopConfiguration.set("fs.s3n.awsSecretAccessKey", s3Secret) // can contain "/"
+			>> val myRDD = sc.textFile("s3n://myBucket/MyFilePattern")
+			>> myRDD.count
+
+ 	'Compute size of Spark dataframe'
+
+	1.  Shows how many partitions in a df and its no of records
+
+		> import org.apache.spark.sql.functions._ 
+	 	> df.withColumn("partitionId", spark_partition_id()).groupBy("partitionId").count().show()
+
+ 	2.  df.groupBy(spark_partition_id()).count().show -- same like above method
+
+ 	3. shows how many partitions in df
+
+ 		> df.select(spark_partition_id()).distinct().count()
+
+ 	-->https://stackoverflow.com/questions/49492463/compute-size-of-spark-dataframe-sizeestimator-gives-unexpected-results
+
+`Working with Structured Operations`
+....
+.......
+........
+
+`Spark Use cases - PYSPARK and Spark-Scala`
+
+'how to rename or delete a file from HDFS inside spark' 
+	package com.bigdataetl
+    import org.apache.hadoop.fs.{FileSystem, Path},
+    import org.apache.spark.sql.SparkSession
+    object Test extends App {
+      val spark = SparkSession.builder.master("local[*]").appName("BigDataETL").getOrCreate()
+       -- Create FileSystem object from Hadoop Configuration
+      val fs = FileSystem.get(spark.sparkContext.hadoopConfiguration)
+       -- Base path where Spark will produce output file
+      val basePath = "/bigtadata_etl/spark/output"
+      val newFileName = "renamed_spark_output"
+       -- Change file name from Spark generic to new one
+      fs.rename(new Path(s"$basePath/part-00000"), new Path(s"$basePath/$newFileName"))
+       --Delete directories recursively using FileSystem class
+	  fs.delete(new Path("/bigdata_etl/data"), true)
+	  -- Delete using Scala DSL
+	  s"hdfs dfs -rm -r /bigdata_etl/data/" !
+	  -- Delete file
+	  fs.removeAcl(new Path("/bigdata_etl/data/file_to_delete.dat"))
+	  -- Delete using Scala DSL
+	  s"hdfs dfs -rm /bigdata_etl/data/file_to_delete.dat" !
+	  }
+
+'How to concatenate a date to a filename in pyspark'
+	import datetime
+	currentdate = datetime.datetime.now().strftime("%Y-%m-%d-%H:%M:%S") 
+	counts.coalesce(1).write.csv("/home/packt/Downloads/myresults3-" + currentdate + ".csv")
+
+
+'read/write a ACID enabled table from spark'
+	pyspark/spark-submit --jars /opt/cloudera/parcels/CDH/lib/hive_warehouse_connector/hive-warehouse-connector-assembly*.jar --py-files /opt/cloudera/parcels/CDH/lib/hive_warehouse_connector/pyspark_hwc*.zip
+	#imports
+	from pyspark.sql import SparkSession
+	from pyspark_llap import HiveWarehouseSession
+	spark = SparkSession.builder.enableHiveSupport().appName("hwc-app").getOrCreate()
+	hwc = HiveWarehouseSession.session(spark).build()
+
+	df = spark.read.format("csv").option('delimiter','~').load('/tmp/spark_test/')
+	hwc.sql("select * from cvdp.NCVDPJC_SAVE_VEH_PII_HTE_SPARKTEST").show(1) #to read from acid table
+	
+	#df.createOrReplaceTempView("mytempTable") --> tried creating a temp table and writing it to acid table using hwl.sql(insert) like below but temptable not visible to hwc.sql
+	#hwc.sql("insert into cvdp.NCVDPJC_SAVE_VEH_PII_HTE_SPARKTEST select * from mytempTable")
+	
+	Work around:
+	df.write.format(HiveWarehouseSession.HIVE_WAREHOUSE_CONNECTOR).option("table", "cvdp.NCVDPJC_SAVE_VEH_PII_HTE_SPARKTEST").save()
+		the above comand failed as the table already exist. dropping the existing table clears the issue
+	
+	df2.write.mode("overwrite").format(HiveWarehouseSession.HIVE_WAREHOUSE_CONNECTOR).option("table", "cvdp.NCVDPJC_SAVE_VEH_PII_HTE_SPARKTEST").save() # Hive column: cvdpjc_vin_hash_d cannot be found at same index: 0 in dataframe. Found _c0. Aborting as this may lead to loading of incorrect data. 
+	Adding schema while loading df from csv helps in resolving the above error. (df2 = spark.read.format("csv").option('delimiter','~').schema(schema).load('/tmp/spark_test/000129_0'))
+	df2.write.format(HiveWarehouseSession.HIVE_WAREHOUSE_CONNECTOR).mode("overwrite").saveAsTable("cvdp.NCVDPJC_SAVE_VEH_PII_HTE_SPARKTEST") #Spark has no access to table `cvdp`.`ncvdpjc_save_veh_pii_hte_sparktest` This table may be a Hive-managed ACID table, or require some other capability that Spark\ncurrently does not implement;
+	df2.write.save('/project/CVDP/CVDPDEV/Warehouse/Secure/VIN/ncvdpjc_save_veh_pii_hte_sparkTest',format='orc',mode='overwrite') #working but the table should be non-partitioned
+
+
+set hive.execution.engine=tez;
+set hive.mapred.mode=nonstrict;
+set hive.vectorized.execution.enabled=false;
+set hive.exec.dynamic.partition=true;
+set hive.exec.dynamic.partition.mode=nonstrict;
+set hive.exec.max.dynamic.partitions.pernode=1000000;
+set hive.optimize.sort.dynamic.partition=true;
+set hive.exec.reducers.bytes.per.reducer=1048576;
+set hive.exec.parallel=true;
+set hive.tez.auto.reducer.parallelism=true;
+set hive.stats.autogather=false;
+set mapreduce.map.memory.mb=8192;
+set mapreduce.map.java.opts=-Xmx6144m;
+set tez.am.resource.memory.mb=32768;
+set hive.tez.container.size=32768;
+set hive.exec.orc.split.strategy=BI;
+set hive.compute.splits.in.am=false;
+set tez.grouping.min-size=544874240;
+set tez.grouping.max-size=644874240;
+set mapreduce.input.fileinputformat.split.minsize=544874240;
+set mapreduce.input.fileinputformat.split.maxsize=644874240;
+set hive.vectorized.execution.enabled=false;
+set hive.vectorized.execution.reduce.enabled=false;
+set tez.runtime.shuffle.ssl.enable=false;
+set hive.orc.cache.use.soft.references=true;
+set hive.auto.convert.join=false;
+
+=============================================================================
+https://spoddutur.github.io/spark-notes/distribution_of_executors_cores_and_memory_for_spark_application.html
+https://stackoverflow.com/questions/37871194/how-to-tune-spark-executor-number-cores-and-executor-memory
+http://site.clairvoyantsoft.com/understanding-resource-allocation-configurations-spark-application/
+https://data-flair.training/forums/topic/by-default-how-many-partitions-are-created-in-rdd-in-apache-spark/
+Spark examples: http://www.javachain.com/import-teradata-using-spark-into-hadoop/
+Kafka
+======
+https://medium.com/@durgaswaroop/a-practical-introduction-to-kafka-storage-internals-d5b544f6925f
+
+http://apachesparkbook.blogspot.com/search/label/a54%7C%20collectAsMap%28%29 --> mini basics
+=============================================================================
+Expect script for auto sudo:
+---------------------------
+#!/usr/bin/expect 
+
+set user [lindex $argv 0] 
+spawn bash
+expect "*hpchdd2e*"
+send "sudo su - ${user}\r"
+expect "?sudo? password for lm8:"
+send "Lo0k@me@1\r"
+set prompt_re {\$ >}
+expect -re $prompt_re
+interact
